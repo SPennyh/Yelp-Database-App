@@ -2,6 +2,7 @@ import pyodbc
 from tkinter import ttk
 from customtkinter import *
 import passwords
+from datetime import datetime
 
 connection = pyodbc.connect(f"driver={{ODBC Driver 18 for SQL Server}};server=cypress.csil.sfu.ca;uid=s_sdh13;pwd={passwords.pwd};Encrypt=yes;TrustServerCertificate=yes")
 cursor = connection.cursor()
@@ -52,7 +53,7 @@ class yelp_gui(CTk):
 
         self.frames = {}
 
-        for F in (loginPage, mainPage, searchBusiness, searchUsers, makeFriend, reviewBusiness):
+        for F in (loginPage, mainPage, searchBusiness, searchUsers):
             frame = F(container, self)
             self.frames[F] = frame
             frame.grid(row=0, column=0, sticky="nsew")
@@ -116,11 +117,13 @@ class searchBusiness(CTkFrame):
         self.bychoice = StringVar()       
         column_name = ['id', 'name', 'address', 'city', 'stars']
         self.tree = ttk.Treeview(self, columns=column_name, show='headings')
+        self.toplevel_window = None
+        self.business_values = None
 
-        entry_border = CTkFrame(self, width=994, height=118, fg_color='#525252')
-        entry_border.place(x=244, y=40)
+        self.entry_border = CTkFrame(self, width=994, height=118, fg_color='#525252')
+        self.entry_border.place(x=244, y=40)
 
-        user_title = CTkLabel(entry_border, text="Yelp Database - Search for a Business", font=('arial bold', 40), text_color='#828AFF')
+        user_title = CTkLabel(self.entry_border, text="Yelp Database - Search for a Business", font=('arial bold', 40), text_color='#828AFF')
         user_title.place(x=16, y=39)
 
         load_buttons(self, controller)
@@ -134,7 +137,7 @@ class searchBusiness(CTkFrame):
             self,
             text="Review Business",
             font=('arial bold', 32),
-            command=self.execute_search, 
+            command=self.review_business, 
             fg_color='#828AFF', 
             corner_radius=15, 
             width=303, 
@@ -148,7 +151,7 @@ class searchBusiness(CTkFrame):
             self,
             text="Search",
             font=('arial bold', 32),
-            command=self.fetch_selected, 
+            command=self.execute_search, 
             fg_color='#828AFF', 
             corner_radius=15, 
             width=303, 
@@ -217,11 +220,21 @@ class searchBusiness(CTkFrame):
         if order and order_by:
             query += f" ORDER BY {order_by} {order.upper()}"
         
+        empty_frame = CTkFrame(self.entry_border, width=200, height=100, corner_radius=20, fg_color='transparent')
+        empty_frame.place(x=775, y=9)
+
+        empty_label = CTkLabel(empty_frame, text="ERROR: Empty Result", text_color='#525252', font=('arial bold', 18))
+        empty_label.place(relx=0.5, rely=0.5, anchor=CENTER)
 
         try:
             cursor = connection.cursor()
             cursor.execute(query)
             results = cursor.fetchall()
+
+            if len(results) == 0:
+                empty_label.configure(text_color='red')
+            else:
+                empty_label.configure(text_color='#525252')
             
             self.populate_treeview(results)
         
@@ -306,36 +319,270 @@ class searchBusiness(CTkFrame):
         selected_item = self.tree.selection() 
         if selected_item:
             item_data = self.tree.item(selected_item)  
-            values = item_data['values'] 
-            print("Selected Item Data:", values) 
+            self.business_values = item_data['values'] 
+            print("Selected Item Data:", self.business_values)
         else:
-            print("No item selected")      
+            print("No item selected")
 
+    def review_business(self):
+        if self.toplevel_window is None or not self.toplevel_window.winfo_exists():
+            self.toplevel_window = ToplevelWindow(self)  # create window if its None or destroyed
+            self.fetch_selected()
+            self.toplevel_window.bus_id = self.business_values[0]
+            self.toplevel_window.bus_name = self.business_values[1]
+            self.toplevel_window.id_label.configure(text=f"{self.business_values[0]}")
+            self.toplevel_window.bus_name_label.configure(text=f"{self.business_values[1]}")
+        else:
+            self.toplevel_window.focus()  # if window exists focus it
 
+class ToplevelWindow(CTkToplevel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.geometry("419x450")
+
+        self.bus_id = None
+        self.bus_name = None
+
+        review_frame = CTkFrame(self, width=393, height=118, corner_radius=20, fg_color='#525252')
+        review_frame.place(x=13, y=10)
+        review_label = CTkLabel(review_frame, text='Review a Business', font=('arial bold', 40), text_color='#828AFF')
+        review_label.place(x=16, y=36)
+
+        business_frame = CTkFrame(self, width=393, height=124, corner_radius=20, fg_color='#525252')
+        business_frame.place(x=13, y=140)
+        business_label = CTkLabel(business_frame, text='For Business:', font=('arial bold', 32), text_color='black')
+        business_label.place(relx=0.5, rely=0.2, anchor=CENTER)
+        self.id_label = CTkLabel(business_frame, text="bus_id holder", font=('arial ', 20), text_color='black')
+        self.id_label.place(relx=0.5, rely=0.5, anchor=CENTER)
+        self.bus_name_label = CTkLabel(business_frame, text="bus_id holder", font=('arial ', 20), text_color='black')
+        self.bus_name_label.place(relx=0.5, rely=0.8, anchor=CENTER)
+
+        stars_frame = CTkFrame(self, width=303, height=79, corner_radius=20, fg_color='#525252')
+        stars_frame.place(x=58, y=281)
+
+        def update_star_value(value):
+            self.min_stars_label.configure(text=f"Stars \N{White Medium Star}: {int(value)}")
+
+        self.slider = CTkSlider(stars_frame, from_=0, to=5, number_of_steps=5, progress_color=('black', '#828AFF'), height=10, width=269, button_color='white', 
+                           command=update_star_value)
+        self.slider.place(x=17, y=57)
+        self.slider.set(int(0))
+
+        self.min_stars_label = CTkLabel(stars_frame, text=f"Stars \N{White Medium Star}: {self.slider.get()}", font=('arial bold', 32), text_color='black')
+        self.min_stars_label.place(relx=0.5, rely=0.3, anchor=CENTER)
+
+        review = CTkButton(
+            self,
+            text="Submit Review",
+            font=('arial bold', 32),
+            command=self.execute_review_query, 
+            fg_color='#828AFF', 
+            corner_radius=15, 
+            width=303, 
+            height=51, 
+            hover_color='#5862E9', 
+            text_color='black'
+        )
+        review.place(x=58, y=381)
+
+    def execute_review_query(self):
+        query_bus_id = self.bus_id
+        query_bus_name = self.bus_name
+        date = datetime.today()
+        date_seconds = int(date.timestamp())
+        date = str(date)
+        date = date[0:23]
+        review_id = 's_sdh13' + str(date_seconds)
+        #formulate query
+        insert_query = f"INSERT INTO review ({review_id}, s_sdh13, {query_bus_id}, {self.slider.get()}, 0, 0, 0,{date})"
+        update_query = f"UPDATE business SET stars = (SELECT ROUND(AVG(CAST(R.stars AS FLOAT)), 2) FROM review R, business b WHERE b.business_id = {query_bus_id} AND R.business_id = b.business_id),  review_count = review_count + 1 WHERE business_id = {query_bus_id}"
+
+        print(f"insert query: {insert_query}")
+        print(f"insert query: {update_query}")
+
+        try:
+            cursor = connection.cursor()
+            cursor.execute(insert_query)
+            cursor.execute(update_query)
+        except (pyodbc.Error, ValueError) as ex:
+            error_message = str(ex)
+            textbox = CTkTextbox(self, width=200, height=50, corner_radius=5)
+            textbox.place(relx=0.5, rely=0.3, anchor=CENTER)
+            textbox.insert("Database Error", f"Error: {error_message}")    
 
 class searchUsers(CTkFrame):
     def __init__(self, parent, controller):
         CTkFrame.__init__(self, parent)
+      
+        self.slider = None
+        self.rev_box = None
+        self.user_box = None
 
-        entry_border = CTkFrame(self, width=994, height=118, fg_color='#525252')
-        entry_border.place(x=244, y=40)
+        self.entry_border = CTkFrame(self, width=994, height=118, fg_color='#525252')
+        self.entry_border.place(x=244, y=40)
 
-        user_title = CTkLabel(entry_border, text="Yelp Database - Search for Users", font=('arial bold', 40), text_color='#828AFF')
+        user_title = CTkLabel(self.entry_border, text="Yelp Database - Search for Users", font=('arial bold', 40), text_color='#828AFF')
         user_title.place(x=16, y=39)
 
         load_buttons(self, controller)
+        self.min_avg_stars()
+        self.min_rev_count()
+        self.user_name()
+        self.instantiate_tree()
 
-class makeFriend(CTkFrame):
-    def __init__(self, parent, controller):
-        CTkFrame.__init__(self, parent)
+        make_friend_but = CTkButton(
+            self,
+            text="Review Business",
+            font=('arial bold', 32),
+            command=self.make_friend_query, 
+            fg_color='#828AFF', 
+            corner_radius=15, 
+            width=303, 
+            height=51, 
+            hover_color='#5862E9', 
+            text_color='black'
+        )
+        make_friend_but.place(x=244, y=629)
 
-        load_buttons(self, controller)
+        search = CTkButton(
+            self,
+            text="Search",
+            font=('arial bold', 32),
+            command=self.execute_search, 
+            fg_color='#828AFF', 
+            corner_radius=15, 
+            width=303, 
+            height=120, 
+            hover_color='#5862E9', 
+            text_color='black'
+        )
+        search.place(x=244, y=493)
 
-class reviewBusiness(CTkFrame):
-    def __init__(self, parent, controller):
-        CTkFrame.__init__(self, parent)
 
-        load_buttons(self, controller)
+    def min_avg_stars(self):
+        min_stars_frame = CTkFrame(self, width=303, height=79, corner_radius=20, fg_color='#525252')
+        min_stars_frame.place(x=244, y=170)
+
+        def update_star_value(value):
+            self.min_stars_label.configure(text=f"Minimum \N{White Medium Star}: {int(value)}")
+
+        self.slider = CTkSlider(min_stars_frame, from_=0, to=5, number_of_steps=5, progress_color=('black', '#828AFF'), height=10, width=269, button_color='white', 
+                           command=update_star_value)
+        self.slider.place(x=16, y=54)
+        self.slider.set(int(0))
+
+        self.min_stars_label = CTkLabel(min_stars_frame, text=f"Minimum \N{White Medium Star}: {self.slider.get()}", font=('arial bold', 32), text_color='black')
+        self.min_stars_label.place(x=19, y=8)
+
+    def min_rev_count(self):
+        rev_frame = CTkFrame(self, width=303, height=102, corner_radius=20, fg_color='#525252')
+        rev_frame.place(x=244, y=261)
+
+        rev_label = CTkLabel(rev_frame, text="Min Review Count", font=('arial bold', 32), text_color='black')
+        rev_label.place(x=19, y=8)
+
+        self.rev_box = CTkEntry(rev_frame, placeholder_text="Enter Amount", width=255, height=30, fg_color='#D9D9D9', border_color='#828AFF', corner_radius=5, text_color='black')
+        self.rev_box.place(x=21, y=52)
+
+    def user_name(self):
+        user_frame = CTkFrame(self, width=303, height=102, corner_radius=20, fg_color='#525252')
+        user_frame.place(x=244, y=375)
+
+        user_label = CTkLabel(user_frame, text="User name \N{Necktie}", font=('arial bold', 32), text_color='black')
+        user_label.place(x=19, y=8)
+
+        self.user_box = CTkEntry(user_frame, placeholder_text="Enter user name", width=255, height=30, fg_color='#D9D9D9', border_color='#828AFF', corner_radius=5, text_color='black')
+        self.user_box.place(x=21, y=52)
+
+    def fetch_selected(self):
+        selected_item = self.tree.selection() 
+        if selected_item:
+            item_data = self.tree.item(selected_item)  
+            self.business_values = item_data['values'] 
+            print("Selected Item Data:", self.business_values)
+        else:
+            print("No item selected")
+
+    def make_friend_query(self):
+        self.slider = None
+        self.rev_box = None
+        self.user_box = None
+
+    def execute_search(self):
+        min_avg_stars = int(self.slider.get())
+        min_review = int(self.rev_box.get().strip())
+        user_name = self.user_box.get().strip()
+        #formulate query
+        query = "SELECT user_id, name, review_count, useful, funny, cool, average_stars, yelping_since FROM user_yelp WHERE 1=1"
+        
+        if min_avg_stars > 0:
+            query += f" AND average_stars >= {min_avg_stars}"
+        
+        if min_review > 0:
+            query += f" AND review_count >= {min_review}"
+        
+        if user_name:
+            query += f" AND name LIKE '%{user_name}%'"
+        
+        query += 'ORDER BY name'
+
+        empty_frame = CTkFrame(self.entry_border, width=200, height=100, corner_radius=20, fg_color='transparent')
+        empty_frame.place(x=775, y=9)
+
+        empty_label = CTkLabel(empty_frame, text="ERROR: Empty Result", text_color='#525252', font=('arial bold', 18))
+        empty_label.place(relx=0.5, rely=0.5, anchor=CENTER)
+
+        try:
+            cursor = connection.cursor()
+            cursor.execute(query)
+            results = cursor.fetchall()
+
+            if len(results) == 0:
+                empty_label.configure(text_color='red')
+            else:
+                empty_label.configure(text_color='#525252')
+            
+            self.populate_treeview(results)
+        
+        except (pyodbc.Error, ValueError) as ex:
+            error_message = str(ex)
+            textbox = CTkTextbox(self, width=200, height=50, corner_radius=5)
+            textbox.place(relx=0.5, rely=0.3, anchor=CENTER)
+            textbox.insert("Database Error", f"Error: {error_message}")
+    
+    def populate_treeview(self, results):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        for row_data in results:
+            sanitized_row = [str(item).replace(",", " ") for item in row_data]
+            self.tree.insert('', 'end', values=sanitized_row)
+
+    def instantiate_tree(self):
+        column_name = ['id', 'name', 'review count', 'useful', 'funny', 'cool', 'average stars', 'registered date']
+        cursor.execute('SELECT user_id, name, review_count, useful, funny, cool, average_stars, yelping_since FROM user_yelp' )
+        row = cursor.fetchall()
+
+        tree_frame = CTkFrame(self, width=667, height=510, corner_radius=20, fg_color='#525252')
+        tree_frame.place(x=571, y=170)
+
+        self.tree = ttk.Treeview(tree_frame, columns=column_name, show='headings', height=28)
+
+        for column in column_name:
+            self.tree.heading(column=column, text=column)
+            self.tree.column(column=column, width=98)
+
+        for row_data in row:
+            sanitized_row = [str(item).replace(",", " ") for item in row_data]
+            self.tree.insert(parent='', index='end', values=sanitized_row)
+        
+        style = ttk.Style()
+        style.theme_use('default')
+        style.configure("Treeview", background='#393939', fieldbackground='#393939', foreground='#828AFF', font=('arial', 12))
+        style.configure("Treeview.Heading", background='#393939', fieldbackground='#393939', foreground='#828AFF', font=('arial bold', 12))
+
+
+        self.tree.place(x=23, y=22) 
 
 
 gui = yelp_gui()
